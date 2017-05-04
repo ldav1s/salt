@@ -9,6 +9,7 @@
 # Import Python Libs
 from __future__ import absolute_import
 import copy
+import os
 
 # Import Salt Testing Libs
 from tests.support.mixins import LoaderModuleMockMixin
@@ -131,6 +132,9 @@ UNINSTALL = {
     }
 }
 
+APT_ARCHIVES_FILE = '{}_{}_{}.deb'.format(LOWPKG_INFO['wget']['name'],
+                                          LOWPKG_INFO['wget']['version'],
+                                          LOWPKG_INFO['wget']['architecture'])
 
 @skipIf(NO_MOCK, NO_MOCK_REASON)
 class AptPkgTestCase(TestCase, LoaderModuleMockMixin):
@@ -340,3 +344,31 @@ class AptPkgTestCase(TestCase, LoaderModuleMockMixin):
                 }
                 with patch.multiple(aptpkg, **patch_kwargs):
                     self.assertEqual(aptpkg.upgrade(), dict())
+
+    @patch('os.walk', MagicMock(return_value=[(aptpkg.APT_ARCHIVES_PATH, ['partial'], [APT_ARCHIVES_FILE])]))
+    @patch('os.path.getsize', MagicMock(return_value=123456))
+    @patch('os.path.getctime', MagicMock(return_value=1234567890.123456))
+    def test_list_downloaded(self):
+        '''
+        Test downloaded packages listing.
+
+        :return:
+        '''
+        DOWNLOADED_RET = {
+            LOWPKG_INFO['wget']['name'] : {
+                LOWPKG_INFO['wget']['version'] : {
+                    'path': os.path.join(aptpkg.APT_ARCHIVES_PATH, APT_ARCHIVES_FILE),
+                    'size': 123456,
+                    'creation_date_time_t': 1234567890,
+                    'creation_date_time': '2009-02-13T23:31:30',
+                }
+            }
+        }
+
+        with patch.dict(aptpkg.__salt__, {'lowpkg.bin_pkg_info': MagicMock(return_value={
+                'name': LOWPKG_INFO['wget']['name'],
+                'version': LOWPKG_INFO['wget']['version'],
+                'arch': LOWPKG_INFO['wget']['architecture']})}):
+            list_downloaded = aptpkg.list_downloaded()
+            self.assertEqual(len(list_downloaded), 1)
+            self.assertDictEqual(list_downloaded, DOWNLOADED_RET)

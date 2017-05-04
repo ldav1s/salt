@@ -78,6 +78,9 @@ except ImportError:
 
 APT_LISTS_PATH = "/var/lib/apt/lists"
 
+# Storage area for retrieved package files.
+APT_ARCHIVES_PATH = '/var/cache/apt/archives'
+
 # Source format for urllib fallback on PPA handling
 LP_SRC_FORMAT = 'deb http://ppa.launchpad.net/{0}/{1}/ubuntu {2} main'
 LP_PVT_SRC_FORMAT = 'deb https://{0}private-ppa.launchpad.net/{1}/{2}/ubuntu' \
@@ -434,6 +437,7 @@ def install(name=None,
             sources=None,
             reinstall=False,
             ignore_epoch=False,
+            downloadonly=False,
             **kwargs):
     '''
     .. versionchanged:: 2015.8.12,2016.3.3,2016.11.0
@@ -515,6 +519,12 @@ def install(name=None,
         operator (e.g. ``>4.1``). If set to ``True``, then the epoch will be
         ignored when comparing the currently-installed version to the desired
         version.
+
+        .. versionadded:: Oxygen
+
+    downloadonly
+
+        Download only; package files are only retrieved, not unpacked or installed.
 
         .. versionadded:: Oxygen
 
@@ -628,7 +638,7 @@ def install(name=None,
         and __salt__['config.get']('systemd.scope', True)
     cmd_prefix = ['systemd-run', '--scope'] if use_scope else []
 
-    old = list_pkgs()
+    old = list_pkgs() if not downloadonly else list_downloaded()
     targets = []
     downgrade = []
     to_reinstall = {}
@@ -656,6 +666,8 @@ def install(name=None,
                 cmd_prefix.append('--install-recommends')
         if 'only_upgrade' in kwargs and kwargs['only_upgrade']:
             cmd_prefix.append('--only-upgrade')
+        if downloadonly:
+            cmd_prefix.append('--download-only')
         if skip_verify:
             cmd_prefix.append('--allow-unauthenticated')
         if fromrepo:
@@ -819,7 +831,7 @@ def install(name=None,
                 errors.append(out['stderr'])
 
         __context__.pop('pkg.list_pkgs', None)
-        new = list_pkgs()
+        new = list_pkgs() if not downloadonly else list_downloaded()
         ret = salt.utils.data.compare_dicts(old, new)
 
         for pkgname in to_reinstall:
@@ -2840,6 +2852,34 @@ def info_installed(*names, **kwargs):
 
         ret[pkg_name] = t_nfo
 
+    return ret
+
+
+def list_downloaded():
+    '''
+    .. versionadded:: Oxygen
+
+    List prefetched packages downloaded by APT in the local disk.
+
+    CLI example:
+
+    .. code-block:: bash
+
+        salt '*' pkg.list_downloaded
+    '''
+
+    ret = {}
+    for root, dirnames, filenames in os.walk(APT_ARCHIVES_PATH):
+        for filename in fnmatch.filter(filenames, '*.deb'):
+            package_path = os.path.join(root, filename)
+            pkg_info = __salt__['lowpkg.bin_pkg_info'](package_path)
+            pkg_timestamp = int(os.path.getctime(package_path))
+            ret.setdefault(pkg_info['name'], {})[pkg_info['version']] = {
+                'path': package_path,
+                'size': os.path.getsize(package_path),
+                'creation_date_time_t': pkg_timestamp,
+                'creation_date_time': datetime.datetime.fromtimestamp(pkg_timestamp).isoformat(),
+            }
     return ret
 
 
